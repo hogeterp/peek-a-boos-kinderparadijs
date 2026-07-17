@@ -1,8 +1,8 @@
-# Peek-a-Boo's Kinderparadijs — website v1.0.0
+# Peek-a-Boo's Kinderparadijs — website v1.0.1
 
 ## Bestanden uploaden via je Samsung
 1. Download en pak het ZIP-bestand uit in **Mijn bestanden**.
-2. Open de map `peek-a-boos-kinderparadijs-v1.0.0`.
+2. Open de map `peek-a-boos-kinderparadijs-v1.0.1`.
 3. Open de GitHub-repository `peek-a-boos-kinderparadijs`.
 4. Kies **Add file / Upload files**.
 5. Upload:
@@ -43,3 +43,7 @@ wordt later gekoppeld aan Firebase Authentication, Firestore en Storage. Zonder 
 
 ## Firebase
 Het Firebase-project bestaat al. Hosting en het echte beheerpaneel kunnen later worden gekoppeld.
+
+
+## Wijziging v1.0.1
+- De knop Werkplan opent nu `Pedagogisch Werkplan Christa.pdf`.
