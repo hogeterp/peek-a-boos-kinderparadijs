@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Review insturen | Peek-a-Boo's Kinderparadijs</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav-wrap">
+      <a class="brand" href="index.html"><span aria-hidden="true">🌈</span><span>Peek-a-Boo's Kinderparadijs</span></a>
+      <nav class="main-nav always-visible"><a href="index.html">Terug naar website</a></nav>
+    </div>
+  </header>
+  <main class="section">
+    <div class="container narrow">
+      <p class="eyebrow">Deel uw ervaring</p>
+      <h1>Review insturen</h1>
+      <p>Een review wordt nooit automatisch openbaar geplaatst. Christa controleert de tekst en vraagt zo nodig toestemming voordat deze op de website verschijnt.</p>
+      <div class="notice"><strong>Let op:</strong> noem liever geen volledige namen of andere herkenbare gegevens van kinderen.</div>
+      <form class="contact-form standalone" id="review-form">
+        <label>Uw naam of gewenste weergavenaam
+          <input type="text" name="naam" placeholder="Bijvoorbeeld: Familie J." required>
+        </label>
+        <label>Beoordeling
+          <select name="sterren" required>
+            <option value="">Kies een beoordeling</option>
+            <option value="5">5 sterren</option>
+            <option value="4">4 sterren</option>
+            <option value="3">3 sterren</option>
+            <option value="2">2 sterren</option>
+            <option value="1">1 ster</option>
+          </select>
+        </label>
+        <label>Uw ervaring
+          <textarea name="review" rows="7" required></textarea>
+        </label>
+        <label class="checkbox"><input type="checkbox" required> Ik geef toestemming om deze review na goedkeuring op de website te plaatsen.</label>
+        <button class="button primary" type="submit">Review voorbereiden</button>
+        <p class="form-note">In deze eerste versie wordt een e-mail klaargezet. Na Firebase kan dit via een beveiligde database en een beheerpagina.</p>
+      </form>
+    </div>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
