@@ -25,6 +25,8 @@ const state = {
   settings: {},
   selections: {},
   schedules: {},
+  archiveDates: [],
+  skippedDates: [],
   currentMessage: "",
   pendingImport: [],
   organizerOpen: sessionStorage.getItem("organizerOpen") === "1"
@@ -42,14 +44,34 @@ function parseLocalDate(key) {
   return new Date(y, m - 1, d, 12, 0, 0);
 }
 
+function getRecentPastTuesday(now = new Date()) {
+  const base = new Date(now);
+  const day = base.getDay();
+  let daysBack = (day - 2 + 7) % 7;
+  if (day === 2 && now.getHours() < 21) daysBack = 7;
+  const recent = new Date(base.getFullYear(), base.getMonth(), base.getDate() - daysBack, 12);
+  return localDateKey(recent);
+}
+
+function organizerDates() {
+  const recent = getRecentPastTuesday();
+  return [...new Set([recent, ...state.dates, ...state.archiveDates])]
+    .sort((a,b)=>b.localeCompare(a));
+}
+
 function getOpenTuesdays(now = new Date()) {
   const base = new Date(now);
   const day = base.getDay();
   let daysToTuesday = (2 - day + 7) % 7;
   if (day === 2 && now.getHours() >= 21) daysToTuesday = 7;
-  const first = new Date(base.getFullYear(), base.getMonth(), base.getDate() + daysToTuesday, 12);
-  const second = new Date(first.getFullYear(), first.getMonth(), first.getDate() + 7, 12);
-  return [localDateKey(first), localDateKey(second)];
+  const result = [];
+  let cursor = new Date(base.getFullYear(), base.getMonth(), base.getDate() + daysToTuesday, 12);
+  while (result.length < 2) {
+    const key = localDateKey(cursor);
+    if (!state.skippedDates.includes(key)) result.push(key);
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 7, 12);
+  }
+  return result;
 }
 
 function formatDate(key) {
@@ -64,6 +86,18 @@ function capitalize(text) {
 
 function fullName(p) {
   return `${p.firstName || ""} ${p.lastName || ""}`.trim();
+}
+
+function membershipLabel(value) {
+  return ({member:"Lid", morning:"Ochtendlid", competition:"Competitielid", none:"Geen lid"})[value] || "Lid";
+}
+
+function normalizeMembership(value) {
+  const text=String(value||"").trim().toLowerCase();
+  if (/ochtend|daglid/.test(text)) return "morning";
+  if (/competitie/.test(text)) return "competition";
+  if (/geen|nee|no|gast|introduc/.test(text)) return "none";
+  return "member";
 }
 
 function displayName(p) {
@@ -135,16 +169,20 @@ function defaultEveningSettings(date) {
   return { date, courtCount:4, courts:[1,2,3,4], start:"20:00", end:"21:30" };
 }
 
-async function loadEveningSettings(date) {
-  if (state.settings[date]) return state.settings[date];
+async function loadEveningSettings(date, forceFresh=false) {
+  if (state.settings[date] && !forceFresh) return state.settings[date];
   const snap = await getDoc(doc(db, "evenings", date));
-  state.settings[date] = snap.exists() ? { ...defaultEveningSettings(date), ...snap.data() } : defaultEveningSettings(date);
-  return state.settings[date];
+  const loaded = snap.exists() ? { ...defaultEveningSettings(date), ...snap.data() } : defaultEveningSettings(date);
+  loaded.courts = [...new Set((loaded.courts || []).map(Number).filter(n => n >= 1 && n <= 10))].sort((a,b)=>a-b);
+  loaded.courtCount = Number(loaded.courtCount || loaded.courts.length || 4);
+  state.settings[date] = loaded;
+  return loaded;
 }
 
 async function saveEveningSettings(date, settings) {
   state.settings[date] = settings;
   await setDoc(doc(db, "evenings", date), settings, { merge:true });
+  await saveArchiveSnapshot(date);
   await logAction("speelavond_bijgewerkt", { date, courts:settings.courts });
 }
 
@@ -272,15 +310,22 @@ async function setResponse(date, playerId, status, source) {
   await setDoc(doc(db, "playingDates", date, "responses", playerId), {
     playerId, status, source, updatedAt:serverTimestamp()
   });
+  state.responses[date] = state.responses[date] || {};
+  state.responses[date][playerId] = status;
+  await saveArchiveSnapshot(date);
   await logAction("beschikbaarheid_gewijzigd", { date, playerId, status, source });
 }
 
 function fillDateSelects() {
+  const allOrganizerDates = organizerDates();
   ["orgDateSelect","scheduleDateSelect","whatsappDateSelect"].forEach(id => {
     const el = $(id);
     const current = el.value;
-    el.innerHTML = state.dates.map(d => `<option value="${d}">${escapeHtml(capitalize(formatDate(d)))}</option>`).join("");
-    if (state.dates.includes(current)) el.value = current;
+    const dates = id === "orgDateSelect" || id === "scheduleDateSelect" || id === "whatsappDateSelect"
+      ? allOrganizerDates
+      : state.dates;
+    el.innerHTML = dates.map(d => `<option value="${d}">${escapeHtml(capitalize(formatDate(d)))}</option>`).join("");
+    if (dates.includes(current)) el.value = current;
   });
 }
 
@@ -455,7 +500,7 @@ async function automaticSchedule(date) {
       return;
     }
 
-    const settings = await loadEveningSettings(date);
+    const settings = await loadEveningSettings(date, true);
     const players = selection.playingIds
       .map(id => state.players.find(p => p.id === id))
       .filter(Boolean);
@@ -494,10 +539,13 @@ async function automaticSchedule(date) {
       });
     });
 
+    const sortedRound1=sortCourtsByConfiguredOrder(round1,settings.courts);
+    const sortedRound2=sortCourtsByConfiguredOrder(round2,settings.courts);
+
     const schedule = {
       date,
-      round1,
-      round2,
+      round1:sortedRound1,
+      round2:sortedRound2,
       createdAt: new Date().toISOString(),
       mode: "automatic"
     };
@@ -511,6 +559,7 @@ async function automaticSchedule(date) {
     });
 
     state.schedules[date] = schedule;
+    await saveArchiveSnapshot(date);
     await logAction("automatische_indeling", { date });
     renderSchedule(date);
   } catch (error) {
@@ -522,103 +571,308 @@ async function automaticSchedule(date) {
 function playerById(id){return state.players.find(p=>p.id===id)}
 function teamText(team){return team.map(id=>displayName(playerById(id))).join(" & ")}
 
-function renderSchedule(date) {
+function sortCourtsByConfiguredOrder(round, configuredCourts) {
+  const order=(configuredCourts||[]).map(Number);
+  return [...(round||[])].sort((a,b)=>{
+    const ai=order.indexOf(Number(a.court));
+    const bi=order.indexOf(Number(b.court));
+    if(ai===-1 && bi===-1) return Number(a.court)-Number(b.court);
+    if(ai===-1) return 1;
+    if(bi===-1) return -1;
+    return ai-bi;
+  });
+}
+
+async function renderSchedule(date) {
   const s=state.schedules[date];
   if (!s) {$("scheduleOutput").innerHTML="<p>Nog geen indeling gemaakt.</p>";return}
+  const settings=await loadEveningSettings(date,true);
+  const round1=sortCourtsByConfiguredOrder(s.round1,settings.courts);
+  const round2=sortCourtsByConfiguredOrder(s.round2,settings.courts);
   const renderRound=(title,round)=>`<div class="round"><h3>${title}</h3><div class="courts-grid">${round.map(c=>`
     <div class="court-card"><strong>Baan ${c.court}</strong>
-      <div class="match-line">${escapeHtml(teamText(c.team1))}</div>
-      <div class="match-line">tegen ${escapeHtml(teamText(c.team2))}</div>
+      <div class="match-line team-line">${escapeHtml(teamText(c.team1))}</div>
+      <div class="vs-line">-</div>
+      <div class="match-line team-line">${escapeHtml(teamText(c.team2))}</div>
     </div>`).join("")}</div></div>`;
-  $("scheduleOutput").innerHTML=renderRound("Tiebreak 1",s.round1)+renderRound("Tiebreak 2 — spelers wisselen van baan",s.round2);
+  $("scheduleOutput").innerHTML=renderRound("Supertie Ronde 1",round1)+renderRound("Supertie Ronde 2",round2);
 }
 
 async function openManualEditor(date) {
   const selection=state.selections[date];
-  if (!selection || selection.playingIds.length<4){alert("Maak eerst een deelnemersselectie.");return}
-  const settings=await loadEveningSettings(date);
+  if (!selection || selection.playingIds.length<4){
+    alert("Maak eerst een deelnemersselectie.");
+    return;
+  }
+
+  const settings=await loadEveningSettings(date,true);
   const courtCount=Math.min(settings.courts.length,Math.floor(selection.playingIds.length/4));
-  const options=selection.playingIds.map(id=>`<option value="${id}">${escapeHtml(displayName(playerById(id)))}</option>`).join("");
+  const courts=settings.courts.slice(0,courtCount);
+  const playerOptions=selection.playingIds
+    .map(id=>`<option value="${id}">${escapeHtml(displayName(playerById(id)))}</option>`)
+    .join("");
+
+  const emptyOption='<option value="">Kies speler</option>';
   const existing=state.schedules[date];
-  $("manualEditor").innerHTML=Array.from({length:courtCount},(_,i)=>{
-    const court=settings.courts[i];
-    const ids=existing?.round1?.[i]?.players || selection.playingIds.slice(i*4,i*4+4);
-    return `<div class="manual-court" data-court="${court}"><strong>Baan ${court}</strong><div class="manual-grid">
-      ${ids.map((id,j)=>`<select data-slot="${j}">${options}</select>`).join("")}
-    </div></div>`;
-  }).join("");
-  [...$("manualEditor").querySelectorAll(".manual-court")].forEach((card,i)=>{
-    const ids=existing?.round1?.[i]?.players || selection.playingIds.slice(i*4,i*4+4);
-    [...card.querySelectorAll("select")].forEach((sel,j)=>sel.value=ids[j]);
+
+  function roundEditor(roundNumber, roundData) {
+    return `
+      <section class="manual-round" data-round="${roundNumber}">
+        <h3>Supertie Ronde ${roundNumber}</h3>
+        <div class="manual-round-courts">
+          ${courts.map((court,index)=>{
+            const existingCourt=(roundData||[]).find(item=>Number(item.court)===Number(court));
+            const team1=existingCourt?.team1||[];
+            const team2=existingCourt?.team2||[];
+            const values=[team1[0]||"",team1[1]||"",team2[0]||"",team2[1]||""];
+
+            return `
+              <div class="manual-court" data-round="${roundNumber}" data-court="${court}">
+                <strong>Baan ${court}</strong>
+
+                <div class="manual-team">
+                  <span class="manual-team-label">Team 1</span>
+                  <div class="manual-grid">
+                    <select data-slot="0">${emptyOption}${playerOptions}</select>
+                    <select data-slot="1">${emptyOption}${playerOptions}</select>
+                  </div>
+                </div>
+
+                <div class="vs-line manual-vs">-</div>
+
+                <div class="manual-team">
+                  <span class="manual-team-label">Team 2</span>
+                  <div class="manual-grid">
+                    <select data-slot="2">${emptyOption}${playerOptions}</select>
+                    <select data-slot="3">${emptyOption}${playerOptions}</select>
+                  </div>
+                </div>
+              </div>`;
+          }).join("")}
+        </div>
+      </section>`;
+  }
+
+  $("manualEditor").innerHTML=
+    roundEditor(1,existing?.round1)+
+    roundEditor(2,existing?.round2);
+
+  [...$("manualEditor").querySelectorAll(".manual-court")].forEach(card=>{
+    const roundNumber=Number(card.dataset.round);
+    const courtNumber=Number(card.dataset.court);
+    const roundData=roundNumber===1?existing?.round1:existing?.round2;
+    const existingCourt=(roundData||[]).find(item=>Number(item.court)===courtNumber);
+    const values=[
+      existingCourt?.team1?.[0]||"",
+      existingCourt?.team1?.[1]||"",
+      existingCourt?.team2?.[0]||"",
+      existingCourt?.team2?.[1]||""
+    ];
+    [...card.querySelectorAll("select")].forEach((select,index)=>{
+      select.value=values[index];
+      select.addEventListener("change",()=>{
+        updateManualSelectOptions(roundNumber);
+        validateManualEditor();
+      });
+    });
   });
+
   $("manualDialog").dataset.date=date;
+  updateManualSelectOptions(1);
+  updateManualSelectOptions(2);
+  validateManualEditor();
   $("manualDialog").showModal();
 }
 
+function readManualRound(roundNumber) {
+  const cards=[...$("manualEditor").querySelectorAll(`.manual-court[data-round="${roundNumber}"]`)];
+  return cards.map(card=>{
+    const values=[...card.querySelectorAll("select")].map(select=>select.value);
+    return {
+      court:Number(card.dataset.court),
+      team1:[values[0],values[1]],
+      team2:[values[2],values[3]],
+      players:values
+    };
+  });
+}
+
+
+function updateManualSelectOptions(roundNumber) {
+  const roundSelects=[...$("manualEditor").querySelectorAll(`.manual-court[data-round="${roundNumber}"] select`)];
+  const chosen=new Set(roundSelects.map(select=>select.value).filter(Boolean));
+
+  roundSelects.forEach(select=>{
+    const ownValue=select.value;
+    [...select.options].forEach(option=>{
+      if (!option.value) {
+        option.hidden=false;
+        option.disabled=false;
+        return;
+      }
+      const usedElsewhere=chosen.has(option.value) && option.value!==ownValue;
+      option.hidden=usedElsewhere;
+      option.disabled=usedElsewhere;
+    });
+  });
+}
+
+function validateManualEditor() {
+  const date=$("manualDialog").dataset.date;
+  const selection=state.selections[date];
+  const selectedIds=selection?.playingIds||[];
+  const selectedSet=new Set(selectedIds);
+  const problems=[];
+
+  [1,2].forEach(roundNumber=>{
+    const round=readManualRound(roundNumber);
+    const allIds=round.flatMap(court=>court.players);
+    const filled=allIds.filter(Boolean);
+
+    if (allIds.some(id=>!id)) {
+      problems.push(`Supertie Ronde ${roundNumber}: nog niet alle plekken zijn ingevuld.`);
+    }
+
+    const duplicates=filled.filter((id,index)=>filled.indexOf(id)!==index);
+    if (duplicates.length) {
+      const duplicateNames=[...new Set(duplicates)]
+        .map(id=>displayName(playerById(id)))
+        .join(", ");
+      problems.push(`Supertie Ronde ${roundNumber}: dubbel gekozen: ${duplicateNames}.`);
+    }
+
+    const missing=selectedIds.filter(id=>!filled.includes(id));
+    if (missing.length) {
+      problems.push(
+        `Supertie Ronde ${roundNumber}: nog in te delen: ${missing.map(id=>displayName(playerById(id))).join(", ")}.`
+      );
+    }
+
+    const unknown=filled.filter(id=>!selectedSet.has(id));
+    if (unknown.length) {
+      problems.push(`Supertie Ronde ${roundNumber}: bevat een speler buiten de selectie.`);
+    }
+  });
+
+  const status=$("manualStatus");
+  const saveButton=$("saveManualSchedule");
+  const valid=problems.length===0;
+
+  if (valid) {
+    status.className="manual-status success";
+    status.innerHTML="Alle spelers zijn in beide supertierondes precies één keer ingedeeld.";
+  } else {
+    status.className="manual-status error";
+    status.innerHTML=problems.map(problem=>`<div>${escapeHtml(problem)}</div>`).join("");
+  }
+
+  saveButton.disabled=!valid;
+  return valid;
+}
+
+
+function buildLearningRecord(date, round1, round2) {
+  const selection=state.selections[date];
+  const playerSnapshot=(selection?.playingIds||[]).map(id=>{
+    const player=playerById(id);
+    return {
+      playerId:id,
+      number:Number(player?.number||0),
+      name:displayName(player),
+      gender:player?.gender||"",
+      rating:player?.rating??null
+    };
+  });
+
+  function enrichRound(roundNumber, courts) {
+    return courts.map(court=>({
+      round:roundNumber,
+      court:Number(court.court),
+      team1:[...court.team1],
+      team2:[...court.team2],
+      teammatePairs:[
+        [...court.team1],
+        [...court.team2]
+      ],
+      opponentPairs:[
+        [court.team1[0],court.team2[0]],
+        [court.team1[0],court.team2[1]],
+        [court.team1[1],court.team2[0]],
+        [court.team1[1],court.team2[1]]
+      ]
+    }));
+  }
+
+  return {
+    date,
+    source:"manual",
+    createdAt:new Date().toISOString(),
+    playerSnapshot,
+    rounds:[
+      ...enrichRound(1,round1),
+      ...enrichRound(2,round2)
+    ]
+  };
+}
+
+async function saveLearningRecord(date, round1, round2) {
+  const learningRecord=buildLearningRecord(date,round1,round2);
+  await setDoc(doc(db,"learningSchedules",date),{
+    learningJson:JSON.stringify(learningRecord),
+    date,
+    source:"manual",
+    updatedAt:serverTimestamp()
+  });
+}
+
 async function saveManualSchedule() {
-  const date = $("manualDialog").dataset.date;
+  const date=$("manualDialog").dataset.date;
+
+  if (!validateManualEditor()) {
+    alert("Maak eerst beide supertierondes volledig en zonder dubbele spelers.");
+    return;
+  }
+
   try {
-    const courtCards = [...$("manualEditor").querySelectorAll(".manual-court")];
-    const used = [];
+    const round1=readManualRound(1).map(court=>({
+      court:court.court,
+      players:[...court.players],
+      team1:[...court.team1],
+      team2:[...court.team2]
+    }));
 
-    const groups = courtCards.map(card => {
-      const ids = [...card.querySelectorAll("select")].map(s => s.value);
-      used.push(...ids);
-      return { court: Number(card.dataset.court), ids };
-    });
+    const round2=readManualRound(2).map(court=>({
+      court:court.court,
+      players:[...court.players],
+      team1:[...court.team1],
+      team2:[...court.team2]
+    }));
 
-    if (new Set(used).size !== used.length) {
-      alert("Een speler staat meer dan één keer in de indeling.");
-      return;
-    }
-    if (groups.some(g => new Set(g.ids).size !== 4)) {
-      alert("Iedere baan moet vier verschillende spelers hebben.");
-      return;
-    }
-
-    const courts = groups.map(g => g.court);
-    const round1 = [];
-    const round2 = [];
-
-    groups.forEach((g, i) => {
-      const ps = g.ids.map(playerById);
-      const pairs = pairingsForGroup(ps);
-      round1.push({
-        court: g.court,
-        players: g.ids,
-        team1: pairs.round1[0].map(p => p.id),
-        team2: pairs.round1[1].map(p => p.id)
-      });
-      round2.push({
-        court: courts[(i + 1) % courts.length],
-        players: g.ids,
-        team1: pairs.round2[0].map(p => p.id),
-        team2: pairs.round2[1].map(p => p.id)
-      });
-    });
-
-    const schedule = {
+    const schedule={
       date,
       round1,
       round2,
-      createdAt: new Date().toISOString(),
-      mode: "manual"
+      createdAt:new Date().toISOString(),
+      mode:"manual"
     };
 
-    await setDoc(doc(db, "schedules", date), {
-      scheduleJson: JSON.stringify(schedule),
+    await setDoc(doc(db,"schedules",date),{
+      scheduleJson:JSON.stringify(schedule),
       date,
-      mode: "manual",
-      updatedAt: serverTimestamp()
+      mode:"manual",
+      updatedAt:serverTimestamp()
     });
 
-    state.schedules[date] = schedule;
-    await logAction("handmatige_indeling", { date });
+    await saveLearningRecord(date,round1,round2);
+
+    state.schedules[date]=schedule;
+    await saveArchiveSnapshot(date);
+    await logAction("handmatige_indeling",{date,learningRecord:true});
     $("manualDialog").close();
     renderSchedule(date);
   } catch (error) {
-    console.error("Handmatige indeling mislukt:", error);
-    alert(`Indeling opslaan mislukt: ${error.message || "onbekende fout"}`);
+    console.error("Handmatige indeling mislukt:",error);
+    alert(`Indeling opslaan mislukt: ${error.message||"onbekende fout"}`);
   }
 }
 
@@ -643,37 +897,81 @@ async function buildMessage(type,date) {
   const counts=getCounts(date);
   const selection=state.selections[date];
   const schedule=state.schedules[date];
-  const readableDate=capitalize(formatDate(date));
-  const title=`🎾 *Tiebreak-opstelling*\n📅 ${readableDate}\n🕗 ${settings.start}–${settings.end}`;
+  const shortDate=capitalize(new Intl.DateTimeFormat("nl-NL",{
+    weekday:"long",day:"numeric",month:"long"
+  }).format(parseLocalDate(date)));
+  const timeText=`${settings.start.replace(":", ".")} tot ${settings.end.replace(":", ".")} uur`;
+  const appText=`Open de app:\n${APP_URL}`;
 
   if (type==="invite") {
-    return `${title}\n\nBeste tennissers,\n\nLaat via de app weten of je:\n🟢 Meedoet\n🟠 Misschien kunt\n🔴 Niet kunt\n\nEr hebben zich al ${counts.yes} spelers aangemeld.\n\n👉 ${APP_URL}`;
+    const lines=[
+      "Supertiebreak-opstelling","",
+      "Beste tennissers,","",
+      `${shortDate} spelen we weer!`,"",
+      `Tijd: ${timeText}.`,"",
+      "Laat via de app weten of je erbij bent."
+    ];
+    if (counts.yes>0) lines.push("",`Er hebben zich al ${counts.yes} spelers aangemeld.`);
+    const free=Math.max(0,settings.courtCount*4-counts.yes);
+    if (free>0) lines.push(`Er ${free===1?"is":"zijn"} nog ${free} ${free===1?"plaats":"plaatsen"} beschikbaar.`);
+    lines.push("",appText);
+    return lines.join("\n");
   }
 
   if (type==="spots") {
     const free=Math.max(0,settings.courtCount*4-counts.yes);
-    return `${title}\n\nEr ${free===1?"is":"zijn"} nog *${free}* ${free===1?"plaats":"plaatsen"} beschikbaar.\n\nZin om mee te spelen? Geef je beschikbaarheid door via:\n\n👉 ${APP_URL}`;
+    return [
+      "Supertiebreak-opstelling","",
+      `Er ${free===1?"is":"zijn"} nog ${free} ${free===1?"plaats":"plaatsen"} beschikbaar voor ${shortDate.toLowerCase()}.`,"",
+      "Lijkt het je leuk om mee te spelen? Meld je dan aan via de app.","",
+      appText
+    ].join("\n");
   }
 
   if (type==="urgent") {
-    return `${title}\n\n🚨 Er is onverwacht een plaats vrijgekomen.\n\nKun jij meespelen? Laat het direct weten via:\n\n👉 ${APP_URL}`;
+    return [
+      "Supertiebreak-opstelling","",
+      `Er is onverwacht een plaats vrijgekomen voor ${shortDate.toLowerCase()}.`,"",
+      "Kun je meespelen? Laat het zo snel mogelijk weten via de app.","",
+      appText
+    ].join("\n");
   }
 
   if (type==="reminder") {
     const names=groupedNames(date,"none");
-    return `${title}\n\nWe missen nog een reactie van:\n\n${names.map(n=>`• ${n}`).join("\n")||"Iedereen heeft gereageerd."}\n\nWillen jullie je beschikbaarheid nog even doorgeven?\n\n👉 ${APP_URL}`;
+    const lines=[
+      "Supertiebreak-opstelling","",
+      "Beste tennissers,","",
+      `We missen nog een reactie voor ${shortDate.toLowerCase()}.`
+    ];
+    if (names.length) lines.push("",...names.map(n=>`- ${n}`));
+    lines.push("","Willen jullie je beschikbaarheid vandaag nog even doorgeven?","",appText);
+    return lines.join("\n");
   }
 
   if (type==="incomplete") {
     const incomplete=state.players.filter(p=>missingFields(p).length);
-    return `🎾 *Tiebreak-opstelling*\n\nWil je je gegevens in de app aanvullen?\n\n${incomplete.map(p=>`• ${displayName(p)}: ${missingFields(p).join(", ")}`).join("\n")||"Alle gegevens zijn compleet."}\n\n👉 ${APP_URL}`;
+    return [
+      "Supertiebreak-opstelling","",
+      "Wil je je gegevens in de app aanvullen?","",
+      ...(incomplete.length?incomplete.map(p=>`- ${displayName(p)}: ${missingFields(p).join(", ")}`):["Alle gegevens zijn compleet."]),
+      "",appText
+    ].join("\n");
   }
 
   if (type==="final") {
-    if (!schedule) return `${title}\n\nEr is nog geen definitieve indeling gemaakt.`;
-    const lines=[title,"","De indeling is bekend. Veel speelplezier! 💪🎾",""];
-    [["Tiebreak 1",schedule.round1],["Tiebreak 2",schedule.round2]].forEach(([label,round])=>{
-      lines.push(`*${label}*`);
+    if (!schedule) return [
+      "Supertiebreak-opstelling","",
+      `Er is nog geen definitieve indeling gemaakt voor ${shortDate.toLowerCase()}.`
+    ].join("\n");
+
+    const lines=[
+      "Supertiebreak-opstelling","",
+      `De indeling voor ${shortDate.toLowerCase()} is bekend.`,"",
+      "Veel speelplezier en een fijne tennisavond!",""
+    ];
+    [["Supertie Ronde 1",schedule.round1],["Supertie Ronde 2",schedule.round2]].forEach(([label,round])=>{
+      lines.push(label);
       round.forEach(c=>lines.push(`Baan ${c.court}: ${teamText(c.team1)} tegen ${teamText(c.team2)}`));
       lines.push("");
     });
@@ -681,7 +979,7 @@ async function buildMessage(type,date) {
     return lines.join("\n");
   }
 
-  return title;
+  return "Supertiebreak-opstelling";
 }
 
 async function openMessagePreview(type) {
@@ -697,13 +995,81 @@ function openWhatsApp() {
 }
 
 async function nextPlayerNumber() {
+  const highestExisting=state.players.reduce((highest,p)=>{
+    const number=Number(p.number);
+    return Number.isInteger(number) && number>highest ? number : highest;
+  },0);
+
   const ref=doc(db,"counters","players");
   return await runTransaction(db,async tx=>{
     const snap=await tx.get(ref);
-    const next=(snap.exists()?snap.data().value:0)+1;
-    tx.set(ref,{value:next});
+    const counterValue=snap.exists()?Number(snap.data().value||0):0;
+    const next=Math.max(counterValue,highestExisting)+1;
+    tx.set(ref,{value:next,updatedAt:serverTimestamp()},{merge:true});
     return next;
   });
+}
+
+async function ensureUniquePlayerNumbers(players) {
+  if (state.numberMigrationRunning || !players.length) return false;
+
+  const numbers=players.map(p=>Number(p.number));
+  const valid=numbers.every(n=>Number.isInteger(n)&&n>0);
+  const unique=new Set(numbers).size===numbers.length;
+  if (valid && unique) {
+    const highest=Math.max(...numbers,0);
+    const counterRef=doc(db,"counters","players");
+    const counterSnap=await getDoc(counterRef);
+    const current=counterSnap.exists()?Number(counterSnap.data().value||0):0;
+    if (current<highest) {
+      await setDoc(counterRef,{value:highest,updatedAt:serverTimestamp()},{merge:true});
+    }
+    return false;
+  }
+
+  state.numberMigrationRunning=true;
+  try {
+    const ordered=[...players].sort((a,b)=>{
+      const an=Number.isInteger(Number(a.number))&&Number(a.number)>0?Number(a.number):999999;
+      const bn=Number.isInteger(Number(b.number))&&Number(b.number)>0?Number(b.number):999999;
+      return an-bn || fullName(a).localeCompare(fullName(b),"nl") || a.id.localeCompare(b.id);
+    });
+
+    const batch=writeBatch(db);
+    ordered.forEach((player,index)=>{
+      batch.set(doc(db,"players",player.id),{
+        number:index+1,
+        updatedAt:serverTimestamp()
+      },{merge:true});
+    });
+    batch.set(doc(db,"counters","players"),{
+      value:ordered.length,
+      updatedAt:serverTimestamp()
+    },{merge:true});
+    await batch.commit();
+    await logAction("spelernummers_gecorrigeerd",{count:ordered.length});
+    return true;
+  } finally {
+    state.numberMigrationRunning=false;
+  }
+}
+
+async function ensureMemberStatus(players) {
+  const missing = players.filter(p => !p.membershipType);
+  if (!missing.length || state.memberMigrationRunning) return false;
+  state.memberMigrationRunning = true;
+  try {
+    const batch = writeBatch(db);
+    missing.forEach(player => batch.set(doc(db,"players",player.id), {
+      membershipType:"member",
+      updatedAt:serverTimestamp()
+    }, {merge:true}));
+    await batch.commit();
+    await logAction("lidstatus_bestaande_spelers_ingesteld", {count:missing.length});
+    return true;
+  } finally {
+    state.memberMigrationRunning = false;
+  }
 }
 
 async function savePlayer() {
@@ -715,7 +1081,8 @@ async function savePlayer() {
   let rating;
   try { rating=parseRating($("rating").value); }
   catch(e){showMessage($("playerFormMessage"),e.message,"error");return}
-  const data={firstName,lastName,gender,rating,updatedAt:serverTimestamp()};
+  const membershipType=$("membershipType").value || "member";
+  const data={firstName,lastName,gender,rating,membershipType,updatedAt:serverTimestamp()};
   if (id) {
     await setDoc(doc(db,"players",id),data,{merge:true});
     await logAction("speler_gewijzigd",{playerId:id});
@@ -736,12 +1103,14 @@ function editPlayer(id) {
   $("lastName").value=p.lastName||"";
   $("gender").value=p.gender||"";
   $("rating").value=p.rating===null||p.rating===undefined?"":formatRating(p.rating);
+  $("membershipType").value=p.membershipType||"member";
   $("cancelEdit").classList.remove("hidden");
   window.scrollTo({top:$("org-manage").offsetTop,behavior:"smooth"});
 }
 
 function resetPlayerForm() {
   ["editingPlayerId","firstName","lastName","gender","rating"].forEach(id=>$(id).value="");
+  $("membershipType").value="member";
   $("cancelEdit").classList.add("hidden");
 }
 
@@ -755,7 +1124,7 @@ async function removePlayer(id) {
 function renderAdminPlayers() {
   $("playerAdminList").innerHTML=state.players.map(p=>`
     <div class="player-admin-row">
-      <div><strong>nr. ${p.number} · ${escapeHtml(fullName(p))}</strong><div class="player-meta">${p.gender||"geslacht leeg"} · rating ${formatRating(p.rating)}</div></div>
+      <div><strong>nr. ${p.number} · ${escapeHtml(fullName(p))}</strong><div class="player-meta">${p.gender||"geslacht leeg"} · rating ${formatRating(p.rating)} · ${membershipLabel(p.membershipType)}</div></div>
       <div class="actions"><button class="secondary" data-edit="${p.id}">Bewerk</button><button class="danger" data-delete="${p.id}">Verwijder</button></div>
     </div>`).join("")||"<p>Nog geen spelers.</p>";
   document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editPlayer(b.dataset.edit));
@@ -766,7 +1135,7 @@ function parseDelimitedRows(text) {
   return text.split(/\r?\n/).map(r=>r.trim()).filter(Boolean).map(line=>{
     const delimiter=line.includes(";")?";":",";
     const [firstName="",lastName="",gender="",rating=""]=line.split(delimiter).map(x=>x.trim());
-    return {firstName,lastName,gender:/^vrouw$/i.test(gender)?"Vrouw":/^man$/i.test(gender)?"Man":"",rating};
+    return {firstName,lastName,gender:/^vrouw$/i.test(gender)?"Vrouw":/^man$/i.test(gender)?"Man":"",rating,membershipType:"member"};
   }).filter(r=>r.firstName);
 }
 
@@ -789,7 +1158,8 @@ async function readImportFile(file) {
     firstName:String(r.Voornaam??r.voornaam??r.FirstName??"").trim(),
     lastName:String(r.Achternaam??r.achternaam??r.LastName??"").trim(),
     gender:String(r.Geslacht??r.geslacht??"").trim(),
-    rating:String(r.Rating??r.rating??r["KNLTB-rating"]??"").trim()
+    rating:String(r.Rating??r.rating??r["KNLTB-rating"]??"").trim(),
+    membershipType:normalizeMembership(String(r.Lidmaatschap??r.lidmaatschap??r.Lid??r.lid??r.Member??"lid").trim())
   })).filter(r=>r.firstName);
   previewImport(normalized);
 }
@@ -801,7 +1171,7 @@ async function confirmImport() {
     try{rating=parseRating(row.rating)}catch(_){rating=null}
     const number=await nextPlayerNumber();
     const ref=doc(collection(db,"players"));
-    batch.set(ref,{number,firstName:row.firstName,lastName:row.lastName,gender:row.gender==="Man"||row.gender==="Vrouw"?row.gender:"",rating,createdAt:serverTimestamp()});
+    batch.set(ref,{number,firstName:row.firstName,lastName:row.lastName,gender:row.gender==="Man"||row.gender==="Vrouw"?row.gender:"",rating,membershipType:row.membershipType||"member",createdAt:serverTimestamp()});
   }
   await batch.commit();
   await logAction("spelers_geimporteerd",{count:state.pendingImport.length});
@@ -816,7 +1186,7 @@ function downloadFile(name,content,type="text/plain") {
 }
 
 function exportCsv() {
-  const rows=[["Nummer","Voornaam","Achternaam","Geslacht","Rating"],...state.players.map(p=>[p.number,p.firstName,p.lastName,p.gender,formatRating(p.rating)])];
+  const rows=[["Nummer","Voornaam","Achternaam","Geslacht","Rating","Lidmaatschap"],...state.players.map(p=>[p.number,p.firstName,p.lastName,p.gender,formatRating(p.rating),membershipLabel(p.membershipType)])];
   const csv=rows.map(r=>r.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n");
   downloadFile("tiebreak-spelers.csv","\ufeff"+csv,"text/csv;charset=utf-8");
 }
@@ -853,6 +1223,98 @@ async function changePin() {
   showMessage($("settingsMessage"),"Pincode gewijzigd.","success");
 }
 
+async function saveArchiveSnapshot(date) {
+  const settings = await loadEveningSettings(date, true);
+  const responses = responseMap(date);
+  const selection = state.selections[date] || null;
+  const schedule = state.schedules[date] || null;
+  await setDoc(doc(db,"eveningArchive",date), {
+    date,
+    settingsJson:JSON.stringify(settings),
+    responsesJson:JSON.stringify(responses),
+    selectionJson:JSON.stringify(selection),
+    scheduleJson:JSON.stringify(schedule),
+    updatedAt:serverTimestamp()
+  }, {merge:true});
+  if (!state.archiveDates.includes(date)) state.archiveDates.push(date);
+}
+
+async function loadArchiveData() {
+  const snap = await getDocs(collection(db,"eveningArchive"));
+  const dates = [];
+  snap.forEach(d => {
+    const data = d.data();
+    const date = data.date || d.id;
+    dates.push(date);
+    try { if (data.settingsJson) state.settings[date] = JSON.parse(data.settingsJson); } catch(_) {}
+    try { if (data.responsesJson) state.responses[date] = JSON.parse(data.responsesJson); } catch(_) {}
+    try { if (data.selectionJson) state.selections[date] = JSON.parse(data.selectionJson); } catch(_) {}
+    try { if (data.scheduleJson) state.schedules[date] = JSON.parse(data.scheduleJson); } catch(_) {}
+  });
+  state.archiveDates = [...new Set(dates)].sort((a,b)=>b.localeCompare(a));
+  renderArchive();
+}
+
+function renderArchive() {
+  const el = $("archiveList");
+  if (!el) return;
+  const dates = state.archiveDates.filter(d => d < state.dates[0]).sort((a,b)=>b.localeCompare(a));
+  if (!dates.length) {
+    el.innerHTML = "<p>Nog geen opgeslagen speelavonden.</p>";
+    return;
+  }
+  el.innerHTML = dates.map(date => {
+    const schedule = state.schedules[date];
+    const selection = state.selections[date];
+    const count = selection?.playingIds?.length || 0;
+    return `<div class="archive-row">
+      <div><strong>${escapeHtml(capitalize(formatDate(date)))}</strong><div class="player-meta">${count} spelers · ${schedule?.mode==="manual"?"handmatig":schedule?"automatisch":"geen indeling"}</div></div>
+      <button type="button" class="secondary" data-archive-date="${date}">Bekijken</button>
+    </div>`;
+  }).join("");
+  el.querySelectorAll("[data-archive-date]").forEach(btn => btn.addEventListener("click", () => {
+    const date = btn.dataset.archiveDate;
+    switchOrg("schedule");
+    fillDateSelects();
+    $("scheduleDateSelect").value = date;
+    renderSelectionSummary(date);
+    renderSchedule(date);
+  }));
+}
+
+async function loadSkippedDates() {
+  const snap=await getDoc(doc(db,"settings","noPlayDates"));
+  state.skippedDates=snap.exists() && Array.isArray(snap.data().dates) ? [...new Set(snap.data().dates)].sort() : [];
+}
+
+function renderSkippedDates() {
+  const el=$("noPlayDatesList");
+  if(!el) return;
+  if(!state.skippedDates.length){el.innerHTML="<p>Nog geen datums overgeslagen.</p>";return;}
+  el.innerHTML=state.skippedDates.map(date=>`<div class="archive-row"><div><strong>${escapeHtml(capitalize(formatDate(date)))}</strong><div class="player-meta">Geen Supertie-speeldag</div></div><button type="button" class="danger" data-remove-no-play="${date}">Verwijderen</button></div>`).join("");
+  el.querySelectorAll("[data-remove-no-play]").forEach(btn=>btn.onclick=()=>removeSkippedDate(btn.dataset.removeNoPlay));
+}
+
+async function addSkippedDate() {
+  const date=$("noPlayDate").value;
+  if(!date){showMessage($("noPlayMessage"),"Kies eerst een datum.","error");return;}
+  if(parseLocalDate(date).getDay()!==2){showMessage($("noPlayMessage"),"Kies een dinsdag.","error");return;}
+  state.skippedDates=[...new Set([...state.skippedDates,date])].sort();
+  await setDoc(doc(db,"settings","noPlayDates"),{dates:state.skippedDates,updatedAt:serverTimestamp()},{merge:true});
+  state.dates=getOpenTuesdays();
+  await loadExistingDocs();
+  fillDateSelects();renderParticipantDates();renderSkippedDates();
+  showMessage($("noPlayMessage"),"Geen Supertie-speeldag opgeslagen.","success");
+}
+
+async function removeSkippedDate(date) {
+  state.skippedDates=state.skippedDates.filter(d=>d!==date);
+  await setDoc(doc(db,"settings","noPlayDates"),{dates:state.skippedDates,updatedAt:serverTimestamp()},{merge:true});
+  state.dates=getOpenTuesdays();
+  await loadExistingDocs();
+  fillDateSelects();renderParticipantDates();renderSkippedDates();
+}
+
 function attachEvents() {
   bindMainNavigation();
   $("pinSubmit").onclick=submitPin;
@@ -864,10 +1326,17 @@ function attachEvents() {
     const current=await loadEveningSettings(date);
     const count=Number($("courtCount").value);
     current.courtCount=count;
-    current.courts=(current.courts||[]).slice(0,count);
-    for(let n=1;current.courts.length<count&&n<=10;n++)if(!current.courts.includes(n))current.courts.push(n);
+    current.courts=[...new Set((current.courts||[]).map(Number))]
+      .filter(n=>n>=1&&n<=10)
+      .sort((a,b)=>a-b)
+      .slice(0,count);
     await saveEveningSettings(date,current);
     $("maxPlayers").textContent=String(count*4);
+    if(current.courts.length<count){
+      showMessage($("courtMessage"),`Kies nog ${count-current.courts.length} baan${count-current.courts.length===1?"":"en"}.`,"error");
+    }else{
+      hideMessage($("courtMessage"));
+    }
     renderCourtPicker(current);
   };
   $("autoSelection").onclick=()=>automaticSelection($("scheduleDateSelect").value);
@@ -886,6 +1355,7 @@ function attachEvents() {
   $("exportCsv").onclick=exportCsv;
   $("exportBackup").onclick=exportBackup;
   $("changePin").onclick=changePin;
+  $("addNoPlayDate").onclick=addSkippedDate;
   $("logoutOrganizer").onclick=()=>{state.organizerOpen=false;sessionStorage.removeItem("organizerOpen");switchMain("participant")};
 }
 
@@ -928,13 +1398,21 @@ function subscribeResponses() {
 }
 
 async function init() {
+  await loadSkippedDates();
   state.dates=getOpenTuesdays();
   attachEvents();
+  renderSkippedDates();
+  await loadArchiveData();
   onSnapshot(collection(db,"players"),async snap=>{
-    state.players=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.number??9999)-(b.number??9999));
+    const loadedPlayers=snap.docs.map(d=>({id:d.id,...d.data()}));
+    const migrated=await ensureUniquePlayerNumbers(loadedPlayers);
+    if (migrated) return;
+    const memberMigrated=await ensureMemberStatus(loadedPlayers);
+    if (memberMigrated) return;
+    state.players=loadedPlayers.sort((a,b)=>(a.number??9999)-(b.number??9999));
     renderPlayerSelect();
     renderParticipantDates();
-    if(state.organizerOpen){renderAdminPlayers();renderOrganizerEvening();renderSchedulePanel();renderStatistics()}
+    if(state.organizerOpen){renderAdminPlayers();renderOrganizerEvening();renderSchedulePanel();renderStatistics();renderArchive()}
   });
   await loadExistingDocs();
   subscribeResponses();

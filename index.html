@@ -2,216 +2,267 @@
 <html lang="nl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Peek-a-Boo's Kinderparadijs: warme, veilige en flexibele kleinschalige gastouderopvang.">
-  <title>Peek-a-Boo's Kinderparadijs</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#147a3e">
+  <title>Supertiebreak-opstelling</title>
+  <link rel="stylesheet" href="style.css?v=2.0.0">
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#main">Ga naar de inhoud</a>
-
-  <header class="site-header">
-    <div class="container nav-wrap">
-      <a class="brand" href="#home" aria-label="Naar de homepagina">
-        <span class="brand-rainbow" aria-hidden="true">🌈</span>
-        <span>Peek-a-Boo's Kinderparadijs</span>
-      </a>
-      <button class="menu-button" aria-expanded="false" aria-controls="main-nav">Menu</button>
-      <nav id="main-nav" class="main-nav" aria-label="Hoofdnavigatie">
-        <a href="#over">Over Christa</a>
-        <a href="#visie">Onze visie</a>
-        <a href="#dag">Dagindeling</a>
-        <a href="#reviews">Reviews</a>
-        <a href="#faq">Veelgestelde vragen</a>
-        <a class="nav-cta" href="#contact">Contact</a>
-      </nav>
+  <a class="club-bar" href="https://tennisverenigingnieuw-vennep.nl/" target="_blank" rel="noopener noreferrer">
+    <img src="club-logo.png" alt="Logo Tennisvereniging Nieuw-Vennep">
+    <span>
+      <strong>Tennisvereniging Nieuw-Vennep</strong>
+      <small>tennisverenigingnieuw-vennep.nl</small>
+    </span>
+  </a>
+  <header class="topbar">
+    <div>
+      <div class="title-row"><h1>🎾 Supertiebreak-opstelling</h1><span id="versionBadge" class="version-badge">v2.0.0</span></div>
+      <p>Dinsdag 20:00–21:30</p>
     </div>
   </header>
 
-  <main id="main">
-    <section id="home" class="hero">
-      <div class="container hero-grid">
-        <div class="hero-copy">
-          <p class="eyebrow">Flexibele kleinschalige kinderopvang</p>
-          <h1>Een warme plek waar ieder kind zich thuis mag voelen</h1>
-          <p class="lead">Persoonlijke opvang in een veilige, huiselijke omgeving, met ruimte om te spelen, ontdekken en groeien.</p>
-          <div class="button-row">
-            <a class="button primary" href="#contact">Plan een kennismaking</a>
-            <a class="button secondary" href="#visie">Bekijk onze werkwijze</a>
+  <nav class="main-tabs" aria-label="Hoofdmenu">
+    <button id="tabParticipant" class="active" type="button">Deelnemer</button>
+    <button id="tabOrganizer" type="button">Organisator</button>
+  </nav>
+
+  <main>
+    <section id="participantView">
+      <div class="card compact">
+        <label for="participantPlayer">Wie ben je?</label>
+        <select id="participantPlayer">
+          <option value="">Kies je naam</option>
+        </select>
+      </div>
+      <div id="participantDates"></div>
+    </section>
+
+    <section id="organizerView" class="hidden">
+      <div id="pinGate" class="card pin-card">
+        <h2>Organisator</h2>
+        <p id="pinHelp">Voer de 4-cijferige pincode in.</p>
+        <input id="pinInput" type="password" inputmode="numeric" maxlength="4" pattern="[0-9]*" placeholder="••••" aria-label="Pincode">
+        <button id="pinSubmit" type="button">Open organisator</button>
+        <div id="pinMessage" class="message hidden"></div>
+      </div>
+
+      <div id="organizerApp" class="hidden">
+        <nav class="sub-tabs" aria-label="Organisatormenu">
+          <button data-org-tab="evening" class="active" type="button">Speelavond</button>
+          <button data-org-tab="schedule" type="button">Indeling</button>
+          <button data-org-tab="whatsapp" type="button">WhatsApp</button>
+          <button data-org-tab="manage" type="button">Beheer</button>
+        </nav>
+
+        <section id="org-evening" class="org-panel">
+          <div id="dashboard" class="dashboard"></div>
+          <div class="card">
+            <div class="row between">
+              <h2>Speelavond</h2>
+              <select id="orgDateSelect" class="date-select"></select>
+            </div>
+
+            <div class="field-grid">
+              <div>
+                <label for="courtCount">Aantal banen</label>
+                <select id="courtCount">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4" selected>4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
+                  <option value="9">9</option>
+                  <option value="10">10</option>
+                </select>
+              </div>
+              <div>
+                <label>Maximaal spelers</label>
+                <div id="maxPlayers" class="readonly">16</div>
+              </div>
+            </div>
+
+            <label>Welke banen?</label>
+            <div id="courtPicker" class="court-picker"></div>
+            <div id="courtMessage" class="message hidden"></div>
           </div>
-          <div class="trust-row" aria-label="Belangrijkste kenmerken">
-            <span>✓ Vast gezicht</span>
-            <span>✓ Kindgericht</span>
-            <span>✓ Flexibel in overleg</span>
+
+          <div class="card">
+            <h2>Aanmeldingen aanpassen</h2>
+            <div id="organizerStatuses" class="status-list"></div>
           </div>
-        </div>
-        <div class="hero-card">
-          <img src="assets/logo.png" alt="Logo van Peek-a-Boo's Kinderparadijs met regenboog, zon en kinderen">
-        </div>
-      </div>
-    </section>
+        </section>
 
-    <section id="over" class="section">
-      <div class="container split">
-        <div>
-          <p class="eyebrow">Over de gastouder</p>
-          <h2>Welkom bij Christa</h2>
-          <p>Ik ben Christa Hogeterp, de vaste gastouder van Peek-a-Boo's Kinderparadijs. Ik bied kinderen een veilige, warme en huiselijke opvang waarin zij zich gezien en gehoord voelen.</p>
-          <p>Ik sluit aan bij de leeftijd, ontwikkeling en behoeften van ieder kind. Door open en eerlijk samen te werken met ouders ontstaat een vertrouwde en gelijkwaardige relatie.</p>
-        </div>
-        <aside class="info-card">
-          <h3>Wat ouders mogen verwachten</h3>
-          <ul class="check-list">
-            <li>Een vaste en vertrouwde gastouder</li>
-            <li>Persoonlijke aandacht en korte lijnen</li>
-            <li>Flexibele opvang in overleg</li>
-            <li>Dagelijks contact over het welzijn van het kind</li>
-            <li>Een rookvrije en kindvriendelijke omgeving</li>
-          </ul>
-        </aside>
-      </div>
-    </section>
-
-    <section id="visie" class="section soft-bg">
-      <div class="container">
-        <p class="eyebrow">Pedagogische visie</p>
-        <h2>Vier uitgangspunten in de dagelijkse opvang</h2>
-        <div class="cards four">
-          <article class="feature-card">
-            <div class="icon">😊</div>
-            <h3>Plezier</h3>
-            <p>Een veilige en ontspannen sfeer, luisteren op kindhoogte, positieve aandacht en vertrouwde rituelen.</p>
-          </article>
-          <article class="feature-card">
-            <div class="icon">🌱</div>
-            <h3>Ontwikkeling</h3>
-            <p>Ruimte voor vrij spel, bewegen, ontdekken en zelfstandig proberen, passend bij ieder kind.</p>
-          </article>
-          <article class="feature-card">
-            <div class="icon">🎨</div>
-            <h3>Fantasie</h3>
-            <p>Creativiteit stimuleren door voorlezen, zingen, knutselen, rollenspel en samen ontdekken.</p>
-          </article>
-          <article class="feature-card">
-            <div class="icon">🤝</div>
-            <h3>Respect</h3>
-            <p>Vriendelijk communiceren, duidelijke grenzen en leren zorgen voor elkaar, materialen en natuur.</p>
-          </article>
-        </div>
-        <div class="download-box">
-          <div>
-            <h3>Pedagogisch werkplan</h3>
-            <p>Lees meer over de visie, veiligheid, samenwerking met ouders en dagelijkse werkwijze.</p>
+        <section id="org-schedule" class="org-panel hidden">
+          <div class="card">
+            <div class="row between wrap">
+              <h2>Deelnemersveld</h2>
+              <select id="scheduleDateSelect" class="date-select"></select>
+            </div>
+            <div class="action-row">
+              <button id="autoSelection" type="button">Automatische selectie</button>
+              <button id="manualSelection" class="secondary" type="button">Selectie wijzigen</button>
+            </div>
+            <div id="selectionSummary" class="selection-summary"></div>
           </div>
-          <a class="button secondary" href="Pedagogisch%20Werkplan%20Christa.pdf" target="_blank" rel="noopener">Werkplan downloaden</a>
-        </div>
-      </div>
-    </section>
 
-    <section id="dag" class="section">
-      <div class="container">
-        <p class="eyebrow">Een dag bij Peek-a-Boo's</p>
-        <h2>Een vertrouwd ritme met ruimte voor ieder kind</h2>
-        <div class="timeline">
-          <article><span>01</span><div><h3>Welkom & vrij spel</h3><p>Rustig binnenkomen, vertellen en kiezen waarmee gespeeld wordt.</p></div></article>
-          <article><span>02</span><div><h3>Samen eten en drinken</h3><p>Gezonde eet- en drinkmomenten met aandacht voor gezellig samen praten.</p></div></article>
-          <article><span>03</span><div><h3>Buiten spelen & bewegen</h3><p>Frisse lucht, fietsen, glijden en spel dat de grove motoriek stimuleert.</p></div></article>
-          <article><span>04</span><div><h3>Ontdekken & creëren</h3><p>Voorlezen, zingen, knutselen, puzzelen of een activiteit vanuit de belevingswereld van de kinderen.</p></div></article>
-          <article><span>05</span><div><h3>Rust of slapen</h3><p>Rustmomenten passend bij het eigen ritme en de behoeften van ieder kind.</p></div></article>
-        </div>
-      </div>
-    </section>
-
-    <section id="reviews" class="section review-section">
-      <div class="container">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Ervaringen van ouders</p>
-            <h2>Reviews</h2>
-            <p>Hier komen echte ervaringen van ouders te staan nadat zij toestemming hebben gegeven.</p>
+          <div class="card">
+            <div class="row between wrap">
+              <h2>Indeling</h2>
+              <div class="action-row">
+                <button id="autoSchedule" type="button">Automatische indeling</button>
+                <button id="manualSchedule" class="secondary" type="button">Zelf indelen</button>
+              </div>
+            </div>
+            <div id="scheduleOutput"></div>
           </div>
-          <a class="button primary" href="reviews.html">Review insturen</a>
-        </div>
-        <div class="cards three" id="approved-reviews">
-          <article class="review-card placeholder-review">
-            <div class="stars" aria-label="Nog geen beoordeling">☆☆☆☆☆</div>
-            <p>De eerste goedgekeurde review kan hier worden geplaatst.</p>
-            <strong>— Binnenkort beschikbaar</strong>
-          </article>
-          <article class="review-card placeholder-review">
-            <div class="stars" aria-label="Nog geen beoordeling">☆☆☆☆☆</div>
-            <p>Reviews worden alleen gepubliceerd na controle en toestemming.</p>
-            <strong>— Privacyvriendelijk</strong>
-          </article>
-          <article class="review-card placeholder-review">
-            <div class="stars" aria-label="Nog geen beoordeling">☆☆☆☆☆</div>
-            <p>Een naam kan bijvoorbeeld worden weergegeven als “Familie J.”</p>
-            <strong>— Naar keuze anoniem</strong>
-          </article>
-        </div>
-      </div>
-    </section>
+        </section>
 
-    <section class="section soft-bg">
-      <div class="container partner-box">
-        <div>
-          <p class="eyebrow">Professionele samenwerking</p>
-          <h2>Aangesloten bij Gastouderbureau Boelie</h2>
-          <p>Peek-a-Boo's Kinderparadijs werkt samen met Gastouderbureau Boelie voor begeleiding, bemiddeling en de administratieve afhandeling van de opvang.</p>
-        </div>
-        <a class="button secondary" href="https://www.gastouderbureauboelie.nl/" target="_blank" rel="noopener noreferrer">Bezoek Gastouderbureau Boelie</a>
-      </div>
-    </section>
-
-    <section id="faq" class="section">
-      <div class="container narrow">
-        <p class="eyebrow">Handige informatie</p>
-        <h2>Veelgestelde vragen</h2>
-        <div class="faq-list">
-          <details><summary>Vanaf welke leeftijd zijn kinderen welkom?</summary><p>Vul hier later de precieze leeftijdsgrenzen van de opvang in.</p></details>
-          <details><summary>Wat zijn de openingstijden?</summary><p>De actuele openingstijden worden later ingevuld. Flexibele opvang is in overleg mogelijk.</p></details>
-          <details><summary>Zijn er nog opvangplekken beschikbaar?</summary><p>Neem contact op voor de actuele beschikbaarheid per dag.</p></details>
-          <details><summary>Hoe verloopt een kennismaking en wenperiode?</summary><p>We bespreken wensen en verwachtingen en maken samen afspraken voor een passende wenperiode.</p></details>
-          <details><summary>Hoe houden jullie contact met ouders?</summary><p>Er is dagelijks contact over het welzijn van het kind. Bij bijzonderheden neemt Christa direct contact op.</p></details>
-          <details><summary>Hoe gaan jullie om met slapen en rust?</summary><p>Er wordt rekening gehouden met het eigen ritme en de behoeften van ieder kind.</p></details>
-          <details><summary>Wat gebeurt er als mijn kind ziek is?</summary><p>Bij ziekte of een ongeval wordt volgens de richtlijnen gehandeld en worden ouders direct geïnformeerd.</p></details>
-          <details><summary>Kan ik kinderopvangtoeslag aanvragen?</summary><p>De voorwaarden verschillen per situatie. Gastouderbureau Boelie kan ouders helpen met informatie over de registratie en administratieve afhandeling.</p></details>
-        </div>
-      </div>
-    </section>
-
-    <section id="contact" class="section contact-section">
-      <div class="container contact-grid">
-        <div>
-          <p class="eyebrow">Kennismaken?</p>
-          <h2>Neem gerust contact op</h2>
-          <p>Vul later het telefoonnummer, e-mailadres en de globale locatie in. Plaats vanwege privacy liever geen volledig woonadres openbaar.</p>
-          <div class="contact-placeholder">
-            <p><strong>Telefoon:</strong> [nog invullen]</p>
-            <p><strong>E-mail:</strong> [nog invullen]</p>
-            <p><strong>Locatie:</strong> [plaats/wijk nog invullen]</p>
+        <section id="org-whatsapp" class="org-panel hidden">
+          <div class="card">
+            <h2>WhatsApp</h2>
+            <label for="whatsappDateSelect">Speelavond</label>
+            <select id="whatsappDateSelect" class="date-select"></select>
+            <div class="whatsapp-grid">
+              <button data-message="invite" type="button">Uitnodiging</button>
+              <button data-message="spots" type="button">Nog plekken vrij</button>
+              <button data-message="urgent" type="button">Dringend invaller</button>
+              <button data-message="reminder" type="button">Nog niet gereageerd</button>
+              <button data-message="final" type="button">Definitieve indeling</button>
+              <button data-message="incomplete" type="button">Gegevens aanvullen</button>
+            </div>
           </div>
-        </div>
-        <form class="contact-form" id="contact-form">
-          <label>Naam<input type="text" name="naam" required></label>
-          <label>E-mailadres<input type="email" name="email" required></label>
-          <label>Telefoonnummer<input type="tel" name="telefoon"></label>
-          <label>Bericht<textarea name="bericht" rows="5" required></textarea></label>
-          <button class="button primary" type="submit">Bericht voorbereiden</button>
-          <p class="form-note">Deze eerste versie opent je e-mailprogramma. Na de Firebase-koppeling kan dit formulier rechtstreeks worden verzonden.</p>
-        </form>
+        </section>
+
+        <section id="org-manage" class="org-panel hidden">
+          <details class="card" open>
+            <summary>Spelers beheren</summary>
+            <div class="field-grid four">
+              <div><label for="firstName">Voornaam</label><input id="firstName" type="text"></div>
+              <div><label for="lastName">Achternaam</label><input id="lastName" type="text"></div>
+              <div>
+                <label for="gender">Geslacht</label>
+                <select id="gender"><option value=""></option><option>Man</option><option>Vrouw</option></select>
+              </div>
+              <div><label for="rating">KNLTB-rating</label><input id="rating" type="text" inputmode="decimal" placeholder="bijv. 6,4"></div>
+              <div><label for="membershipType">Lidmaatschap</label><select id="membershipType"><option value="member" selected>Lid</option><option value="morning">Ochtendlid</option><option value="competition">Competitielid</option><option value="none">Geen lid</option></select></div>
+            </div>
+            <input id="editingPlayerId" type="hidden">
+            <div class="action-row">
+              <button id="savePlayer" type="button">Speler opslaan</button>
+              <button id="cancelEdit" class="secondary hidden" type="button">Annuleren</button>
+            </div>
+            <div id="playerFormMessage" class="message hidden"></div>
+            <div id="playerAdminList" class="player-admin-list"></div>
+          </details>
+
+          <details class="card">
+            <summary>Importeren en exporteren</summary>
+            <label for="bulkText">Tekst plakken — één speler per regel</label>
+            <textarea id="bulkText" rows="6" placeholder="Carel;Jacobs;Man;6,4"></textarea>
+            <div class="action-row">
+              <button id="importText" type="button">Tekst importeren</button>
+              <label class="file-button">CSV/Excel kiezen<input id="importFile" type="file" accept=".csv,.xlsx,.xls"></label>
+            </div>
+            <div id="importPreview"></div>
+            <div class="action-row">
+              <button id="confirmImport" class="hidden" type="button">Import bevestigen</button>
+              <button id="exportCsv" class="secondary" type="button">Spelers naar CSV</button>
+              <button id="exportBackup" class="secondary" type="button">Volledige back-up</button>
+            </div>
+          </details>
+
+
+          <details class="card">
+            <summary>Geen Supertie-speeldagen</summary>
+            <p>Kies een dinsdag waarop niet wordt gespeeld.</p>
+            <div class="field-grid">
+              <div><label for="noPlayDate">Dinsdag</label><input id="noPlayDate" type="date"></div>
+              <div class="action-row align-end"><button id="addNoPlayDate" type="button">Toevoegen</button></div>
+            </div>
+            <div id="noPlayMessage" class="message hidden"></div>
+            <div id="noPlayDatesList"></div>
+          </details>
+
+          <details class="card">
+            <summary>Speelavondenarchief</summary>
+            <p>Opgeslagen speelavonden blijven hier bewaard.</p>
+            <div id="archiveList"></div>
+          </details>
+
+          <details class="card">
+            <summary>Statistieken</summary>
+            <div id="statistics"></div>
+          </details>
+
+          <details class="card">
+            <summary>Nieuw in v2.0.0</summary>
+            <ul>
+              <li>Speelavonden worden opgeslagen in een archief.</li>
+              <li>De laatste speelavond blijft nog 7 dagen beschikbaar voor de organisator.</li>
+              <li>Lidmaatschap: Lid, Ochtendlid, Competitielid of Geen lid.</li>
+              <li>De organisator kan Geen Supertie-speeldagen instellen.</li>
+              <li>In de opstelling staat een streepje tussen de teams.</li>
+            </ul>
+          </details>
+
+          <details class="card">
+            <summary>Instellingen</summary>
+            <div class="field-grid">
+              <div><label for="oldPin">Huidige pincode</label><input id="oldPin" type="password" inputmode="numeric" maxlength="4"></div>
+              <div><label for="newPin">Nieuwe pincode</label><input id="newPin" type="password" inputmode="numeric" maxlength="4"></div>
+            </div>
+            <div class="action-row">
+              <button id="changePin" type="button">Pincode wijzigen</button>
+              <button id="logoutOrganizer" class="danger" type="button">Uitloggen</button>
+            </div>
+            <div id="settingsMessage" class="message hidden"></div>
+          </details>
+        </section>
       </div>
     </section>
   </main>
 
-  <footer class="site-footer">
-    <div class="container footer-grid">
-      <div><strong>Peek-a-Boo's Kinderparadijs</strong><p>Warme, veilige en kleinschalige gastouderopvang.</p></div>
-      <div><a href="#faq">Veelgestelde vragen</a><a href="reviews.html">Review insturen</a><a href="privacy.html">Privacy</a></div>
-      <div><p>© <span id="year"></span> Peek-a-Boo's Kinderparadijs</p><p>Versie 1.0.0</p></div>
-    </div>
-  </footer>
+  <dialog id="selectionDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>Selectie wijzigen</h2>
+      <p>Kies wie speelt. Het aantal moet een veelvoud van 4 zijn en mag niet hoger zijn dan het aantal beschikbare plekken.</p>
+      <div id="selectionEditor"></div>
+      <div class="dialog-actions">
+        <button id="saveSelection" type="button">Opslaan</button>
+        <button value="cancel" class="secondary">Annuleren</button>
+      </div>
+    </form>
+  </dialog>
 
-  <script src="script.js"></script>
+  <dialog id="manualDialog">
+    <form method="dialog" class="dialog-card wide">
+      <h2>Zelf indelen</h2>
+      <p>Vul voor Supertie Ronde 1 en Supertie Ronde 2 alle banen volledig in. Gekozen spelers verdwijnen binnen dezelfde ronde uit de andere keuzelijsten.</p>
+      <div id="manualStatus" class="manual-status"></div>
+      <div id="manualEditor"></div>
+      <div class="dialog-actions">
+        <button id="saveManualSchedule" type="button">Indeling opslaan</button>
+        <button value="cancel" class="secondary">Annuleren</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="whatsappDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>WhatsApp-voorbeeld</h2>
+      <textarea id="whatsappPreview" rows="14"></textarea>
+      <div class="dialog-actions">
+        <button id="openWhatsApp" type="button">Open WhatsApp</button>
+        <button value="cancel" class="secondary">Annuleren</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js?v=2.0.0"></script>
 </body>
 </html>
